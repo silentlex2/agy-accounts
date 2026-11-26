@@ -10,8 +10,6 @@
   var state = {
     data: null,
     loading: false,
-    refreshing: false,
-    lastFetchAt: 0,
     hoverEmail: null,
     open: false,
     pinned: false,
@@ -29,8 +27,7 @@
   var menuBtn = null;
   var dropdownWrap = null;
   var dropdown = null;
-  var subcardWrap = null;
-  var subcard = null;
+  var emailHintEl = null;
   var modal = null;
   var toastEl = null;
 
@@ -64,10 +61,6 @@
       primaryText: '#ffffff',
       green: dark ? '#4ade80' : '#16a34a',
       greenBg: dark ? 'rgba(74,222,128,0.14)' : 'rgba(22,163,74,0.10)',
-      amber: dark ? '#fbbf24' : '#d97706',
-      red: dark ? '#f87171' : '#dc2626',
-      barBg: dark ? 'rgba(255,255,255,0.10)' : 'rgba(10,10,12,0.08)',
-      chipBg: dark ? 'rgba(96,165,250,0.15)' : 'rgba(47,117,195,0.10)',
     };
   }
 
@@ -87,9 +80,7 @@
   }
 
   function isPointerInsideMenu() {
-    return inRect(mouseX, mouseY, menuBtn, 4) ||
-      inRect(mouseX, mouseY, dropdownWrap, 4) ||
-      inRect(mouseX, mouseY, subcardWrap, 4);
+    return inRect(mouseX, mouseY, menuBtn, 4) || inRect(mouseX, mouseY, dropdownWrap, 4);
   }
 
   function clearCloseTimer() {
@@ -129,84 +120,20 @@
     }, 2600);
   }
 
-  function toneColor(frac, t) {
-    if (frac === null || frac === undefined) return t.muted;
-    if (frac > 0.55) return t.green;
-    if (frac > 0.2) return t.amber;
-    return t.red;
-  }
-
-  function formatReset(iso) {
-    if (!iso) return '重置时间未知';
-    var d = new Date(iso);
-    if (isNaN(d.getTime())) return '重置时间未知';
-    var diffMs = d.getTime() - Date.now();
-    var pad = function (n) { return (n < 10 ? '0' : '') + n; };
-    var now = new Date();
-    var sameDay = d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth() && d.getDate() === now.getDate();
-    var dayStr = sameDay ? '今天' : (d.getMonth() + 1) + '/' + d.getDate();
-    var timeStr = dayStr + ' ' + pad(d.getHours()) + ':' + pad(d.getMinutes());
-    if (diffMs <= 0) return timeStr + '（即将重置）';
-    var mins = Math.round(diffMs / 60000);
-    var span = mins >= 120 ? Math.floor(mins / 60) + 'h ' + (mins % 60) + 'm' : mins + 'm';
-    return timeStr + ' 重置（还有 ' + span + '）';
-  }
-
-  function ensureData(forceRefresh) {
-    if (forceRefresh) {
-      if (state.refreshing) return;
-      state.refreshing = true;
-      updateUI();
-      bridge.refresh().then(function (res) {
-        if (res && !res.error) {
-          state.data = res;
-          state.lastFetchAt = Date.now();
-        } else if (res && res.error) {
-          showToast('刷新失败: ' + res.error);
-        }
-      }).catch(function (err) {
-        showToast('刷新失败: ' + (err && err.message ? err.message : String(err)));
-      }).finally(function () {
-        state.refreshing = false;
-        updateUI();
-      });
-      return;
-    }
-
+  function loadData() {
     if (state.loading) return;
     state.loading = true;
     bridge.list().then(function (res) {
       if (res && !res.error) {
         state.data = res;
-        var missing = (res.accounts || []).some(function (a) { return !a.gemini; });
-        var stale = !state.lastFetchAt || (Date.now() - state.lastFetchAt > 300000);
-        if (missing && stale && !state.refreshing) {
-          ensureData(true);
-        }
+      } else if (res && res.error) {
+        showToast('读取账号列表失败: ' + res.error);
       }
     }).catch(function () {
     }).finally(function () {
       state.loading = false;
-      updateUI();
+      if (state.open) renderDropdown();
     });
-  }
-
-  function updateUI() {
-    if (!state.open) return;
-    renderDropdown();
-    if (state.hoverEmail) {
-      var anchorRow = findRowElement(state.hoverEmail);
-      renderSubcard(anchorRow);
-    }
-  }
-
-  function findRowElement(email) {
-    if (!dropdown) return null;
-    var rows = dropdown.querySelectorAll('[data-agy-email]');
-    for (var i = 0; i < rows.length; i++) {
-      if (rows[i].getAttribute('data-agy-email') === email) return rows[i];
-    }
-    return null;
   }
 
   function closeMenus() {
@@ -215,7 +142,6 @@
     state.pinned = false;
     state.hoverEmail = null;
     if (dropdownWrap) dropdownWrap.style.display = 'none';
-    if (subcardWrap) subcardWrap.style.display = 'none';
   }
 
   function openMenu(pinned) {
@@ -223,8 +149,7 @@
     var wasOpen = state.open;
     state.open = true;
     if (pinned !== undefined) state.pinned = pinned;
-    if (!state.data) ensureData(false);
-    else if (!wasOpen) ensureData(false);
+    if (!state.data || !wasOpen) loadData();
     renderDropdown();
     placeDropdown();
   }
@@ -233,31 +158,8 @@
     if (!dropdownWrap || !menuBtn || !state.open) return;
     var r = menuBtn.getBoundingClientRect();
     dropdownWrap.style.display = 'block';
-    // 紧贴按钮底边不留真空缝隙，内部 paddingTop:6px 做视觉呼吸感与鼠标桥接
     dropdownWrap.style.top = Math.round(r.bottom - 1) + 'px';
-    dropdownWrap.style.left = Math.round(Math.max(8, Math.min(r.left, window.innerWidth - 240))) + 'px';
-  }
-
-  function placeSubcard(anchorRow) {
-    if (!subcardWrap || !dropdownWrap || !anchorRow || !state.hoverEmail) {
-      if (subcardWrap) subcardWrap.style.display = 'none';
-      return;
-    }
-    var dr = dropdown.getBoundingClientRect();
-    var rr = anchorRow.getBoundingClientRect();
-    subcardWrap.style.display = 'block';
-    var cardW = subcardWrap.offsetWidth || 276;
-    var flipLeft = dr.right + cardW > window.innerWidth - 10;
-    if (flipLeft) {
-      subcardWrap.style.padding = '0 6px 0 0';
-      subcardWrap.style.left = Math.round(Math.max(8, dr.left - cardW)) + 'px';
-    } else {
-      subcardWrap.style.padding = '0 0 0 6px';
-      subcardWrap.style.left = Math.round(dr.right - 2) + 'px';
-    }
-    var cardH = subcardWrap.offsetHeight || 200;
-    var top = Math.min(Math.max(8, rr.top - 8), window.innerHeight - cardH - 10);
-    subcardWrap.style.top = Math.round(top) + 'px';
+    dropdownWrap.style.left = Math.round(Math.max(8, Math.min(r.left, window.innerWidth - 250))) + 'px';
   }
 
   function ensureContainers() {
@@ -273,76 +175,11 @@
       dropdownWrap.appendChild(dropdown);
       document.body.appendChild(dropdownWrap);
     }
-    if (!subcardWrap) {
-      subcardWrap = el('div', '', '');
-      subcardWrap.setAttribute('data-agy-accounts-ui', '1');
-      subcardWrap.style.cssText = 'position:fixed;z-index:2147483645;padding-left:6px;display:none;-webkit-app-region:no-drag;';
-      subcardWrap.addEventListener('mouseenter', clearCloseTimer);
-      subcardWrap.addEventListener('mouseleave', scheduleClose);
-
-      subcard = el('div', '', '');
-      subcard.setAttribute('data-agy-accounts-ui', '1');
-      subcardWrap.appendChild(subcard);
-      document.body.appendChild(subcardWrap);
-    }
   }
 
-  function renderSubcard(anchorRow) {
-    ensureContainers();
-    if (!state.open || !state.hoverEmail || !state.data) {
-      subcardWrap.style.display = 'none';
-      return;
-    }
-    var acc = (state.data.accounts || []).find(function (a) { return a.email === state.hoverEmail; });
-    if (!acc) {
-      subcardWrap.style.display = 'none';
-      return;
-    }
-    var t = theme();
-    subcard.style.cssText =
-      'width:264px;padding:13px 14px;border-radius:12px;' +
-      'background:' + t.surface + ';color:' + t.fg + ';border:1px solid ' + t.border + ';' +
-      'box-shadow:' + t.shadow + ';font-family:system-ui,-apple-system,Segoe UI,sans-serif;' +
-      '-webkit-app-region:no-drag;';
-    while (subcard.firstChild) subcard.removeChild(subcard.firstChild);
-
-    var head = el('div', '', 'display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:3px;');
-    var titleLeft = el('div', '', 'display:flex;align-items:center;gap:6px;');
-    titleLeft.appendChild(el('span', acc.shortName, 'font:600 13.5px/1.3 ui-monospace,SFMono-Regular,Consolas,monospace;color:' + t.fg + ';'));
-    titleLeft.appendChild(el('span', 'Gemini 配额', 'font:500 11.5px/1.3 system-ui;color:' + t.muted + ';'));
-    head.appendChild(titleLeft);
-
-    var gem = acc.gemini;
-    if (gem && gem.window && gem.window !== '-') {
-      head.appendChild(el('span', gem.window, 'font:600 10.5px/1.2 ui-monospace,monospace;padding:2px 6px;border-radius:5px;background:' + t.chipBg + ';color:' + t.primary + ';'));
-    }
-    subcard.appendChild(head);
-
-    subcard.appendChild(el('div', acc.email, 'font:400 11px/1.35 ui-monospace,monospace;color:' + t.muted + ';margin-bottom:10px;word-break:break-all;'));
-
-    var panel = el('div', '', 'padding:10px 11px;border-radius:9px;background:' + t.subSurface + ';border:1px solid ' + t.border + ';');
-    if (!gem) {
-      var msg = state.refreshing ? '正在拉取 Gemini 配额…' : (acc.error ? '拉取失败: ' + acc.error : '暂无配额缓存，点击下方刷新');
-      panel.appendChild(el('div', msg, 'font:400 11.5px/1.45 system-ui;color:' + t.muted + ';'));
-    } else {
-      var frac = (gem.remaining === null || gem.remaining === undefined) ? null : Number(gem.remaining);
-      var pct = frac === null ? null : Math.round(frac * 100);
-      var tone = toneColor(frac, t);
-
-      var pctRow = el('div', '', 'display:flex;align-items:baseline;justify-content:space-between;margin-bottom:6px;');
-      pctRow.appendChild(el('span', pct === null ? '—' : pct + '%', 'font:700 22px/1.1 system-ui;font-variant-numeric:tabular-nums;color:' + tone + ';'));
-      pctRow.appendChild(el('span', '剩余可用', 'font:400 11px/1.2 system-ui;color:' + t.muted + ';'));
-      panel.appendChild(pctRow);
-
-      var bar = el('div', '', 'height:6px;border-radius:999px;overflow:hidden;background:' + t.barBg + ';margin-bottom:7px;');
-      bar.appendChild(el('div', '', 'height:100%;border-radius:999px;width:' + Math.max(2, pct || 0) + '%;background:' + tone + ';'));
-      panel.appendChild(bar);
-
-      panel.appendChild(el('div', formatReset(gem.reset), 'font:400 11px/1.35 system-ui;color:' + t.muted + ';'));
-    }
-    subcard.appendChild(panel);
-
-    if (anchorRow) placeSubcard(anchorRow);
+  function updateEmailHint() {
+    if (!emailHintEl) return;
+    emailHintEl.textContent = state.hoverEmail || '点击目标账号可安全切换';
   }
 
   function openConfirmModal(acc) {
@@ -376,10 +213,6 @@
     tcLeft.appendChild(el('div', acc.shortName, 'font:600 13.5px/1.3 ui-monospace,monospace;color:' + t.fg + ';'));
     tcLeft.appendChild(el('div', acc.email, 'font:400 11.5px/1.35 ui-monospace,monospace;color:' + t.muted + ';word-break:break-all;'));
     targetCard.appendChild(tcLeft);
-    if (acc.gemini && acc.gemini.remaining !== null && acc.gemini.remaining !== undefined) {
-      var pct = Math.round(acc.gemini.remaining * 100);
-      targetCard.appendChild(el('span', 'Gemini ' + pct + '%', 'font:600 12px/1.2 system-ui;color:' + toneColor(acc.gemini.remaining, t) + ';white-space:nowrap;margin-left:10px;'));
-    }
     box.appendChild(targetCard);
 
     box.appendChild(el('div',
@@ -505,7 +338,7 @@
           cancelBtn.disabled = false;
           showToast('操作失败: ' + res.error);
         }
-      }).catch(function (err) {
+      }).catch(function () {
         state.switching = false;
         okBtn.textContent = '退出并登录新账号';
         okBtn.style.opacity = '1';
@@ -530,7 +363,7 @@
 
     var t = theme();
     dropdown.style.cssText =
-      'width:214px;padding:6px;border-radius:12px;' +
+      'width:228px;padding:6px;border-radius:12px;' +
       'background:' + t.surface + ';color:' + t.fg + ';border:1px solid ' + t.border + ';' +
       'box-shadow:' + t.shadow + ';font-family:system-ui,-apple-system,Segoe UI,sans-serif;' +
       '-webkit-app-region:no-drag;';
@@ -567,12 +400,10 @@
         }
         row.appendChild(left);
 
-        var right = el('div', '', 'display:flex;align-items:center;gap:5px;flex-shrink:0;');
-        if (acc.gemini && acc.gemini.remaining !== null && acc.gemini.remaining !== undefined) {
-          var pct = Math.round(acc.gemini.remaining * 100);
-          right.appendChild(el('span', pct + '%', 'font:500 11.5px/1.2 ui-monospace,monospace;font-variant-numeric:tabular-nums;color:' + toneColor(acc.gemini.remaining, t) + ';'));
+        var right = el('div', '', 'display:flex;align-items:center;gap:4px;flex-shrink:0;');
+        if (!acc.active) {
+          right.appendChild(el('span', '›', 'font:400 13px/1 system-ui;color:' + t.muted + ';opacity:0.65;'));
         }
-        right.appendChild(el('span', '›', 'font:400 13px/1 system-ui;color:' + t.muted + ';opacity:0.65;'));
         row.appendChild(right);
 
         row.addEventListener('mouseenter', function () {
@@ -583,7 +414,7 @@
             for (var k = 0; k < allRows.length; k++) {
               allRows[k].style.background = allRows[k] === row ? t.hover : 'transparent';
             }
-            renderSubcard(row);
+            updateEmailHint();
           }
         });
         row.addEventListener('click', function (e) {
@@ -593,7 +424,7 @@
             return;
           }
           if (!acc.inPool) {
-            showToast('该账号尚未入池，请先点击存入当前账号');
+            showToast('该账号尚未入池，请重新打开菜单同步');
             return;
           }
           openConfirmModal(acc);
@@ -608,7 +439,15 @@
     var newRow = el('div', '+ 添加新账号',
       'padding:6px 9px;border-radius:7px;cursor:pointer;font:500 12px/1.3 system-ui;color:' + t.primary + ';'
     );
-    newRow.addEventListener('mouseenter', function () { newRow.style.background = t.hover; state.hoverEmail = null; renderSubcard(); });
+    newRow.addEventListener('mouseenter', function () {
+      newRow.style.background = t.hover;
+      if (state.hoverEmail) {
+        state.hoverEmail = null;
+        var allRows = dropdown.querySelectorAll('[data-agy-email]');
+        for (var k = 0; k < allRows.length; k++) allRows[k].style.background = 'transparent';
+        updateEmailHint();
+      }
+    });
     newRow.addEventListener('mouseleave', function () { newRow.style.background = 'transparent'; });
     newRow.addEventListener('click', function (e) {
       e.stopPropagation();
@@ -616,16 +455,11 @@
     });
     dropdown.appendChild(newRow);
 
-    var refRow = el('div', state.refreshing ? '↻ 正在刷新配额…' : '↻ 刷新 Gemini 配额',
-      'padding:6px 9px;border-radius:7px;cursor:pointer;font:400 12px/1.3 system-ui;color:' + t.muted + ';'
+    emailHintEl = el('div', state.hoverEmail || '点击目标账号可安全切换',
+      'padding:3px 9px 2px;font:400 10.5px/1.35 ui-monospace,SFMono-Regular,Consolas,monospace;color:' + t.muted + ';' +
+      'white-space:nowrap;overflow:hidden;text-overflow:ellipsis;opacity:0.85;'
     );
-    refRow.addEventListener('mouseenter', function () { refRow.style.background = t.hover; state.hoverEmail = null; renderSubcard(); });
-    refRow.addEventListener('mouseleave', function () { refRow.style.background = 'transparent'; });
-    refRow.addEventListener('click', function (e) {
-      e.stopPropagation();
-      ensureData(true);
-    });
-    dropdown.appendChild(refRow);
+    dropdown.appendChild(emailHintEl);
   }
 
   function hasSiblingMenuText(container) {
@@ -709,7 +543,7 @@
   function onMouseDown(e) {
     if (!state.open) return;
     var t = e.target;
-    if ((menuBtn && menuBtn.contains(t)) || (dropdownWrap && dropdownWrap.contains(t)) || (subcardWrap && subcardWrap.contains(t))) return;
+    if ((menuBtn && menuBtn.contains(t)) || (dropdownWrap && dropdownWrap.contains(t))) return;
     closeMenus();
   }
 
@@ -736,7 +570,7 @@
     document.removeEventListener('mousemove', onMouseMove, true);
     document.removeEventListener('mousedown', onMouseDown, true);
     document.removeEventListener('keydown', onKeyDown, true);
-    [menuBtn && menuBtn.parentElement && menuBtn.parentElement.getAttribute('data-agy-accounts-ui') ? menuBtn.parentElement : menuBtn, dropdownWrap, subcardWrap, modal, toastEl].forEach(function (n) {
+    [menuBtn && menuBtn.parentElement && menuBtn.parentElement.getAttribute('data-agy-accounts-ui') ? menuBtn.parentElement : menuBtn, dropdownWrap, modal, toastEl].forEach(function (n) {
       if (n && n.parentNode) n.parentNode.removeChild(n);
     });
   };

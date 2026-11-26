@@ -6,8 +6,7 @@ const path = require('node:path');
 
 const cred = require('./lib/cred');
 const pool = require('./lib/pool');
-const quota = require('./lib/quota');
-const { loadLocalConfig } = require('./lib/local-config');
+const { loadLocalConfig, getProxy } = require('./lib/local-config');
 
 function getUsage() { return require('./lib/usage'); }
 
@@ -29,18 +28,6 @@ function arg(name, def) {
   if (i === -1) return def;
   const v = process.argv[i + 1];
   return v && !v.startsWith('--') ? v : true;
-}
-function fmtPct(f) {
-  if (f === null || f === undefined) return '  ?  ';
-  return String(Math.round(Number(f) * 100)).padStart(3) + '% ';
-}
-function fmtReset(iso) {
-  if (!iso) return '-';
-  const d = new Date(iso);
-  const h = Math.round((d.getTime() - Date.now()) / 3600000);
-  const pad = (n) => String(n).padStart(2, '0');
-  const stamp = (d.getMonth() + 1) + '/' + d.getDate() + ' ' + pad(d.getHours()) + ':' + pad(d.getMinutes());
-  return stamp + (h >= 0 ? ' (in ' + (h >= 24 ? Math.round(h / 24) + 'd' : h + 'h') + ')' : ' (passed)');
 }
 
 function cmdCurrent() {
@@ -107,7 +94,7 @@ function launchAppSilently() {
   const exePath = path.join(process.env.LOCALAPPDATA || '', 'Programs', 'antigravity', 'Antigravity.exe');
   const ensureCore = process.env.AGY_ENSURE_CORE || cfg.ensureCoreScript || '';
   const ctxAgent = process.env.AGY_CTX_AGENT || cfg.ctxAgentScript || '';
-  const proxy = quota.getProxy();
+  const proxy = getProxy();
 
   if (ensureCore && fs.existsSync(ensureCore)) {
     try { execFileSync(process.execPath, [ensureCore], { stdio: 'ignore', windowsHide: true, timeout: 8000 }); } catch (e) {}
@@ -234,37 +221,6 @@ function cmdNewAccount() {
   restartApp(true);
 }
 
-function cmdQuota() {
-  const st = pool.load();
-  const all = arg('all', false);
-  const cur = (function () { try { return cred.read(); } catch (e) { return null; } })();
-  const emails = all ? st.order.slice() : [cur ? cur.email : null].filter(Boolean);
-  if (!emails.length) { console.log('no account'); return; }
-  for (const email of emails) {
-    let token;
-    if (cur && cur.email === email) token = cur.token;
-    else if (st.accounts[email]) token = (typeof st.accounts[email].blob === 'string' ? JSON.parse(st.accounts[email].blob) : st.accounts[email].blob).token;
-    if (!token) { console.log(email + ': no token stored'); continue; }
-    try {
-      const fresh = quota.ensureToken(token);
-      const res = quota.fetchQuota(fresh);
-      if (!res.ok) { console.log(email + ': quota failed -> ' + res.error); continue; }
-      const tier = res.tier ? (res.tier.name || res.tier.tierName || res.tier.id || '') : '';
-      console.log('\n' + email + (tier ? '   [' + tier + ']' : ''));
-      for (const b of quota.summarizeAll(res)) {
-        console.log('  ' + String(b.group || '').padEnd(22) + String(b.window || '').padEnd(7) + ' left ' + fmtPct(b.remaining) + ' reset ' + fmtReset(b.reset));
-        if (b.models && b.models.length) console.log('      ' + b.models.join(', '));
-      }
-      if (fresh !== token && st.accounts[email]) {
-        const blob = JSON.parse(st.accounts[email].blob);
-        blob.token = fresh;
-        pool.upsert(st, { email: email, blob: JSON.stringify(blob) });
-        pool.save(st);
-      }
-    } catch (e) { console.log(email + ': ' + e.message); }
-  }
-}
-
 function cmdUsage() {
   const days = Number(arg('days', 30));
   const evs = getUsage().collect();
@@ -372,7 +328,6 @@ function fmtSec(v) { return (v === null || v === undefined) ? '-' : Number(v).to
 function avg(a) { return a.length ? a.reduce((x, y) => x + y, 0) / a.length : 0; }
 function pctOf(a, p) { if (!a.length) return 0; const s = a.slice().sort((x, y) => x - y); const i = Math.min(s.length - 1, Math.max(0, Math.round((p / 100) * (s.length - 1)))); return s[i]; }
 function cmdExportPage() {
-  const withQuota = arg('quota', false);
   const outFile = path.join(__dirname, 'magpie-plugin', 'page', 'data.js');
   const st = pool.load();
   let cur = null;
@@ -385,58 +340,17 @@ function cmdExportPage() {
     };
   } catch (e) { cur = null; }
 
-  const toBucket = (q, email) => ({ account: email, group: q.group, window: q.window, remaining: q.remaining, reset: q.reset, models: q.models || null });
-
   const accounts = st.order.map((email) => {
     const a = st.accounts[email] || {};
-    let buckets = a.quota || [];
-    let stale = false;
-    if (withQuota) {
-      let fetched = false;
-      try {
-        let token = null;
-        if (cur && cur.email === email) { try { token = cred.read().token; } catch (e) {} }
-        if (!token && a.blob) { const b = JSON.parse(a.blob); token = b.token || null; }
-        if (token) {
-          const fresh = quota.ensureToken(token);
-          const res = quota.fetchQuota(fresh);
-          if (res.ok) {
-            buckets = quota.summarizeAll(res);
-            fetched = true;
-            pool.upsert(st, { email: email, quota: buckets, quotaAt: new Date().toISOString() });
-            if (fresh !== token && a.blob) { const b = JSON.parse(a.blob); b.token = fresh; st.accounts[email].blob = JSON.stringify(b); }
-            pool.save(st);
-          }
-        }
-      } catch (e) { buckets = buckets || []; }
-      stale = !fetched;
-    }
-    const mapped = (stale && withQuota)
-      ? [{ account: email, group: '配额读取失败', window: '-', remaining: null, reset: null, models: null }]
-      : buckets.map((q) => toBucket(q, email));
-    return { email: email, label: a.label || '', addedAt: a.addedAt, stale: stale, quota: mapped };
+    return { email: email, label: a.label || '', addedAt: a.addedAt, quota: [] };
   });
 
-  // The account Antigravity is signed in as is not always the one kept in the pool;
-  // show it too so the tiles never describe an account that is not in use.
   if (cur && cur.email && !st.accounts[cur.email]) {
-    let liveBuckets = [];
-    let stale = true;
-    if (withQuota) {
-      try {
-        const tok = cred.read().token;
-        if (tok) {
-          const res = quota.fetchQuota(quota.ensureToken(tok));
-          if (res.ok) { liveBuckets = quota.summarizeAll(res); stale = false; }
-        }
-      } catch (e) { liveBuckets = []; }
-    }
     accounts.unshift({
       email: cur.email,
       label: '当前登录（不在池中）',
       addedAt: null,
-      stale: stale,
-      quota: liveBuckets.map((q) => toBucket(q, cur.email)),
+      quota: [],
     });
   }
 
@@ -511,45 +425,10 @@ function cmdExportPage() {
   fs.mkdirSync(path.dirname(outFile), { recursive: true });
   fs.writeFileSync(outFile, 'globalThis.AGY_DATA = ' + JSON.stringify(data, null, 1) + ';\n', 'utf8');
   console.log('page snapshot written: ' + outFile);
-  console.log('  accounts ' + accounts.length + ' · quota buckets ' + accounts.reduce((n, a) => n + a.quota.length, 0) + ' · usage ' + evs.length + ' generations');
-}
-
-function pickGeminiBucket(buckets) {
-  if (!Array.isArray(buckets)) return null;
-  const hit = buckets.find((b) => {
-    if (!b) return false;
-    if (b.id === 'gemini-models') return true;
-    if (typeof b.group === 'string' && /gemini/i.test(b.group)) return true;
-    if (Array.isArray(b.models) && b.models.some((m) => /^gemini/i.test(String(m)))) return true;
-    return false;
-  });
-  if (!hit) return null;
-  const models = Array.isArray(hit.models)
-    ? hit.models.filter((m) => /^gemini/i.test(String(m)))
-    : [];
-  return {
-    remaining: (hit.remaining === undefined || hit.remaining === null) ? null : Number(hit.remaining),
-    window: hit.window || '5h',
-    reset: hit.reset || null,
-    models: models,
-  };
-}
-
-function readSnapshotFallback(email) {
-  try {
-    const snapFile = path.join(__dirname, 'magpie-plugin', 'page', 'data.js');
-    if (!fs.existsSync(snapFile)) return null;
-    const raw = fs.readFileSync(snapFile, 'utf8').replace(/^globalThis\.AGY_DATA\s*=\s*/, '').replace(/;\s*$/, '');
-    const snap = JSON.parse(raw);
-    const item = (snap.accounts || []).find((a) => a && a.email === email);
-    return item ? { quota: item.quota || [], quotaAt: snap.generatedAt || null } : null;
-  } catch (e) {
-    return null;
-  }
+  console.log('  accounts ' + accounts.length + ' · usage ' + evs.length + ' generations');
 }
 
 function cmdMenuData() {
-  const withRefresh = arg('refresh', false);
   const st = pool.load();
   let cur = null;
   try { cur = cred.read(); } catch (e) { cur = null; }
@@ -569,59 +448,13 @@ function cmdMenuData() {
 
   const list = [];
   const pushAccount = (email, meta, inPool) => {
-    let buckets = (meta && meta.quota) || [];
-    let quotaAt = (meta && meta.quotaAt) || null;
-    let err = null;
-
-    if (!buckets.length && !withRefresh) {
-      const fb = readSnapshotFallback(email);
-      if (fb && fb.quota.length) {
-        buckets = fb.quota;
-        quotaAt = fb.quotaAt;
-      }
-    }
-
-    if (withRefresh) {
-      try {
-        let token = null;
-        if (cur && cur.email === email) token = cur.token;
-        else if (meta && meta.blob) token = JSON.parse(meta.blob).token || null;
-        if (token) {
-          const fresh = quota.ensureToken(token);
-          const res = quota.fetchQuota(fresh);
-          if (res.ok) {
-            buckets = quota.summarizeAll(res);
-            quotaAt = new Date().toISOString();
-            if (inPool) {
-              const patch = { email, quota: buckets, quotaAt };
-              if (fresh !== token && meta && meta.blob) {
-                const b = JSON.parse(meta.blob);
-                b.token = fresh;
-                patch.blob = JSON.stringify(b);
-              }
-              pool.upsert(st, patch);
-              pool.save(st);
-            }
-          } else {
-            err = res.error || '配额拉取失败';
-          }
-        } else {
-          err = '缺少 OAuth token';
-        }
-      } catch (e) {
-        err = e.message || String(e);
-      }
-    }
-
     list.push({
       email,
       shortName: String(email).slice(0, 4),
-      label: (meta && meta.label) || (inPool ? '' : '当前未入池'),
+      label: (meta && meta.label) || '',
+      addedAt: (meta && meta.addedAt) || null,
       active: email === curEmail,
       inPool,
-      quotaAt,
-      gemini: pickGeminiBucket(buckets),
-      error: err,
     });
   };
 
@@ -645,7 +478,7 @@ try {
   else if (cmd === 'list') cmdList();
   else if (cmd === 'add') cmdAdd();
   else if (cmd === 'use') cmdUse(process.argv[3]);
-  else if (cmd === 'quota') cmdQuota();
+  else if (cmd === 'quota') throw new Error('quota command removed: direct cloudcode-pa internal API calls can flag Google accounts');
   else if (cmd === 'usage') cmdUsage();
   else if (cmd === 'turns') cmdTurns();
   else if (cmd === 'export-page') cmdExportPage();
@@ -658,11 +491,11 @@ try {
     console.log('  list                    list saved accounts');
     console.log('  add [--label X]         save the current credential into the pool');
     console.log('  use <email|#n> [--no-restart]   switch account (restarts the client by default)');
-    console.log('  quota [--all]           fetch quota and reset times');
+    console.log('  new-account             sign out current account and restart to add a new one');
     console.log('  usage [--days N]        local token usage from Antigravity conversation DBs');
     console.log('  turns [--list] [--conv ID] [--last N|--all] [--json]   per-turn endpoint / TPS / TTFT');
-    console.log('  export-page [--quota]   write the snapshot the magpie page renders');
-    console.log('  menu-data [--refresh]   JSON snapshot for desktop menu UI');
+    console.log('  export-page             write the snapshot the magpie page renders');
+    console.log('  menu-data               JSON snapshot for desktop menu UI');
   }
 } catch (e) {
   console.error('error: ' + e.message);

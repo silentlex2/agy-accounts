@@ -1,4 +1,4 @@
-// Antigravity accounts / quota / usage, exposed to every agent through magpie's MCP tools.
+// Antigravity accounts / local usage, exposed to every agent through magpie's MCP tools.
 // Backed by the local CLI at ../cli.js — no network of its own, no extra dependency.
 import { execFileSync } from "node:child_process";
 
@@ -20,7 +20,7 @@ function refreshPage() {
   if (exporting) return;
   exporting = true;
   try {
-    execFileSync(process.execPath, [CLI, "export-page", "--quota"], { windowsHide: true, timeout: 180000, stdio: "ignore" });
+    execFileSync(process.execPath, [CLI, "export-page"], { windowsHide: true, timeout: 180000, stdio: "ignore" });
   } catch (e) {
     // a failing snapshot must never take the plugin host down
   } finally {
@@ -64,16 +64,6 @@ export const AgyAccountsTools = async () => ({
         const flags = args.restart === false ? ["--no-restart"] : [];
         return run(["use", acc, ...flags], 180000);
       },
-    },
-    agy_quota: {
-      description:
-        "Fetches Antigravity quota for the active account (or every saved account with all=true): remaining fraction per window " +
-        "(5h and weekly) and when each window resets. Uses the account's own token; refreshes it when expired.",
-      args: {
-        type: "object",
-        properties: { all: { type: "boolean", description: "query every saved account, not just the active one" } },
-      },
-      async execute(args) { return run(args && args.all ? ["quota", "--all"] : ["quota"], 180000); },
     },
     agy_usage: {
       description:

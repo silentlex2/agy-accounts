@@ -2,7 +2,5 @@
   "proxy": "",
   "launcher": "",
   "ensureCoreScript": "",
-  "ctxAgentScript": "",
-  "oauthClientId": "",
-  "oauthClientSecret": ""
+  "ctxAgentScript": ""
 }

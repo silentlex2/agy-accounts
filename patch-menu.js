@@ -105,7 +105,6 @@ ${MARKER_START}
         });
       });
       localOnly('agy-accounts:list', async () => _runMenu(['menu-data']));
-      localOnly('agy-accounts:refresh', async () => _runMenu(['menu-data', '--refresh']));
       localOnly('agy-accounts:add-current', async () => _runMenu(['add']));
       localOnly('agy-accounts:switch', async (_event, req) => {
         const email = req && typeof req.email === 'string' ? req.email.trim() : '';
@@ -151,7 +150,6 @@ ${MARKER_START}
     if (_el && _el.ipcRenderer) {
       var _bridge = {
         list: function () { return _el.ipcRenderer.invoke('agy-accounts:list'); },
-        refresh: function () { return _el.ipcRenderer.invoke('agy-accounts:refresh'); },
         addCurrent: function () { return _el.ipcRenderer.invoke('agy-accounts:add-current'); },
         switchAccount: function (email) { return _el.ipcRenderer.invoke('agy-accounts:switch', { email: email }); },
         newAccount: function () { return _el.ipcRenderer.invoke('agy-accounts:new-account'); },

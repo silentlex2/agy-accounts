@@ -19,22 +19,6 @@
     return Math.round(s / 3600) + ' 小时前';
   }
 
-  function resetIn(iso) {
-    if (!iso) return '';
-    var d = new Date(iso);
-    var h = (d.getTime() - Date.now()) / 3600000;
-    var pad = function (n) { return (n < 10 ? '0' : '') + n; };
-    var span = h >= 48 ? Math.round(h / 24) + ' 天' : Math.max(0, Math.round(h)) + ' 小时';
-    return (d.getMonth() + 1) + '/' + d.getDate() + ' ' + pad(d.getHours()) + ':' + pad(d.getMinutes()) + ' · 还有 ' + span;
-  }
-
-  function tone(f) {
-    if (f === null || f === undefined) return 'var(--faint)';
-    if (f > 0.55) return 'var(--sage)';
-    if (f > 0.2) return 'var(--clay)';
-    return 'var(--rust)';
-  }
-
   function poolIndexOf(d, email) {
     var list = d.accounts || [];
     for (var i = 0; i < list.length; i++) { if (list[i].email === email) return i + 1; }
@@ -57,42 +41,6 @@
     txt.append(el('div', 'meta', bits.join('  ·  ')));
     row.append(txt);
     box.append(row);
-  }
-
-  function renderQuota(d) {
-    var box = $('quota');
-    box.replaceChildren();
-    var tiles = 0;
-    var withQ = (d.accounts || []).filter(function (a) { return (a.quota || []).length; });
-    var multi = withQ.length > 1;
-    (d.accounts || []).forEach(function (a) {
-      if (multi && (a.quota || []).length) {
-        box.append(el('div', 'qacct', String(a.email || '') + (a.stale ? '  ·  旧数据' : '')));
-      }
-      (a.quota || []).forEach(function (q) {
-        tiles++;
-        var frac = (q.remaining === null || q.remaining === undefined) ? null : q.remaining;
-        var t = el('div', 'qtile');
-        var lab = el('div', 'qlabel');
-        lab.append(el('span', 'win', q.window || ''));
-        var grp = String(q.group || '').replace('Claude and GPT models', 'Claude · GPT');
-        if (q.models && q.models.length) grp += ' · ' + q.models.length + ' 个';
-        if (a.stale && !multi) grp += ' · 旧数据';
-        lab.append(el('span', 'grp', grp));
-        if (q.models && q.models.length) t.title = q.models.join(', ');
-        var num = el('div', 'qnum');
-        num.append(document.createTextNode(frac === null ? '—' : String(Math.round(frac * 100))));
-        num.append(el('span', 'pct', '%'));
-        var bar = el('div', 'qbar');
-        var fill = el('i');
-        fill.style.width = Math.max(1.5, Math.round((frac === null ? 0 : frac) * 100)) + '%';
-        fill.style.background = tone(frac);
-        bar.append(fill);
-        t.append(lab, num, bar, el('div', 'qreset', resetIn(q.reset)));
-        box.append(t);
-      });
-    });
-    if (!tiles) box.append(el('div', 'empty', '还没有配额数据 · agy-accounts.cmd export-page --quota'));
   }
 
   function renderPool(d) {
@@ -267,13 +215,12 @@
   function paint(d) {
     $('stamp').textContent = '快照 ' + ago(d.generatedAt) + ' · 账号 ' + (d.accounts || []).length + ' 个 · 自动刷新';
     renderCurrent(d);
-    renderQuota(d);
     renderPool(d);
     renderFigures(d);
     renderSpark(d);
     renderModels(d);
     renderTurns(d);
-    $('hint').textContent = 'CLI: agy-accounts.cmd use <email> · quota --all · usage --days 7 · turns --stats    |    magpie: magpie tool magpie-plugin_agy_quota';
+    $('hint').textContent = 'CLI: agy-accounts.cmd use <email> · usage --days 7 · turns --stats';
   }
 
   function pull() {
@@ -284,7 +231,7 @@
       s.remove();
     };
     s.onerror = function () {
-      $('stamp').textContent = '还没有快照 · 运行 agy-accounts.cmd export-page --quota';
+      $('stamp').textContent = '还没有快照 · 运行 agy-accounts.cmd export-page';
       s.remove();
     };
     document.head.append(s);

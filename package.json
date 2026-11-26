@@ -1,7 +1,7 @@
 {
   "name": "agy-accounts",
   "version": "1.0.0",
-  "description": "Account switcher menu & Gemini quota tracker for Google Antigravity Desktop App",
+  "description": "Account switcher menu & credential pool manager for Google Antigravity Desktop App",
   "main": "cli.js",
   "license": "MIT",
   "scripts": {
