@@ -1,0 +1,21 @@
+# 敏感凭据与个人账号数据（切勿提交）
+accounts.json
+accounts.json.tmp
+backups/
+local.config.json
+
+# 运行日志与本地快照
+*.log
+magpie-plugin/page/data.js
+page-preview/
+preview-page.cmd
+preview*.png
+magpie-sidebar.png
+shot*.png
+tools/shoot*.ps1
+tools/ui.ps1
+
+# 依赖与系统文件
+node_modules/
+.DS_Store
+Thumbs.db

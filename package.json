@@ -1,0 +1,16 @@
+{
+  "name": "agy-accounts",
+  "version": "1.0.0",
+  "description": "Account switcher menu & Gemini quota tracker for Google Antigravity Desktop App",
+  "main": "cli.js",
+  "license": "MIT",
+  "scripts": {
+    "status": "node patch-menu.js status",
+    "install-menu": "node patch-menu.js install",
+    "uninstall-menu": "node patch-menu.js uninstall",
+    "dry-run": "node patch-menu.js install --dry-run"
+  },
+  "dependencies": {
+    "@electron/asar": "^3.2.14"
+  }
+}

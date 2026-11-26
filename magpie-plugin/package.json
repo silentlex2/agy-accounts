@@ -1,0 +1,34 @@
+{
+  "name": "@local/magpie-tools-agy-accounts",
+  "version": "0.2.2",
+  "description": "Antigravity accounts: switching, quota and local token usage as magpie tools, plus a page in magpie's window",
+  "type": "module",
+  "main": "./index.mjs",
+  "files": [
+    "index.mjs",
+    "page",
+    "README.md"
+  ],
+  "keywords": [
+    "magpie",
+    "magpie-tools",
+    "magpie-page",
+    "mcp",
+    "antigravity",
+    "accounts",
+    "quota"
+  ],
+  "license": "MIT",
+  "magpie": {
+    "page": {
+      "title": "Antigravity accounts",
+      "titles": {
+        "zh": "agy 账号",
+        "zh-TW": "agy 帳號",
+        "ja": "Antigravity アカウント"
+      },
+      "file": "page/index.html",
+      "icon": "page/icon.svg"
+    }
+  }
+}

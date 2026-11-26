@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>agy 账号</title>
+<link rel="stylesheet" href="style.css?v=022">
+<script src="_magpie/bridge.js"></script>
+<script src="app.js?v=022" defer></script>
+</head>
+<body>
+<div class="page">
+  <header class="top">
+    <div>
+      <div class="eyebrow">Antigravity</div>
+      <h1>账号与用量</h1>
+      <div class="stamp" id="stamp">读取中</div>
+    </div>
+    <button type="button" id="reload" class="ghost">刷新快照</button>
+  </header>
+
+  <div class="split">
+    <div class="col">
+      <section class="current" id="current"></section>
+      <section class="quotas" id="quota"></section>
+    </div>
+    <aside class="col">
+      <h2>账号池</h2>
+      <ul class="pool" id="accounts"></ul>
+    </aside>
+  </div>
+
+  <section class="usage">
+    <h2>本地用量</h2>
+    <div class="figures" id="figures"></div>
+    <div class="spark" id="spark"></div>
+    <ul class="models" id="models"></ul>
+  </section>
+
+  <section class="usage turns">
+    <h2>最近轮次 <span class="sub" id="turnconv"></span></h2>
+    <div class="figures" id="turnstats"></div>
+    <ul class="tlist" id="turns"></ul>
+  </section>
+
+  <footer class="hint" id="hint"></footer>
+</div>
+</body>
+</html>
